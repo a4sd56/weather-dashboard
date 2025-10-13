@@ -1,7 +1,6 @@
 import os
 from flask import Flask, render_template, request, jsonify
 from flask_sqlalchemy import SQLAlchemy
-from flask_apscheduler import APScheduler
 from datetime import datetime, timedelta, timezone
 import requests
 import json
@@ -15,7 +14,6 @@ basedir = os.path.abspath(os.path.dirname(__file__))
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(basedir, 'weather.db')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
-scheduler = APScheduler()
 KST = timezone(timedelta(hours=9))
 
 # --- 1. 데이터베이스 모델 정의 ---
@@ -27,15 +25,19 @@ class WeatherReading(db.Model):
     pressure = db.Column(db.Float)
     timestamp = db.Column(db.DateTime(timezone=True), nullable=False, unique=True)
 
-# --- 2. 백그라운드 자동 업데이트 함수 ---
-def update_today_kma_data():
+# --- 2. 데이터 업데이트 함수 ---
+def update_kma_data_in_db():
+    """API에서 최신 데이터를 가져와 DB를 업데이트하는 단일 함수"""
     with app.app_context():
         now_kst = datetime.now(KST)
-        print(f"\n[INFO] 스케줄러 실행: '{now_kst.strftime('%Y-%m-%d')}' 데이터 자동 업데이트 시작...")
+        print(f"\n[INFO] '{now_kst.strftime('%Y-%m-%d')}' 데이터 업데이트를 시도합니다...")
+        
         auth_key = "AOns516sTNCp7OderLzQ7Q"
         url = 'https://apihub.kma.go.kr/api/typ01/url/kma_sfctm3.php'
-        start_time_str, end_time_str = now_kst.strftime('%Y%m%d0000'), now_kst.strftime('%Y%m%d2300')
+        start_time_str = now_kst.strftime('%Y%m%d0000')
+        end_time_str = now_kst.strftime('%Y%m%d2300')
         params = {'authKey': auth_key, 'tm1': start_time_str, 'tm2': end_time_str, 'stn': '159', 'help': '0'}
+
         try:
             urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
             response = requests.get(url, params=params, timeout=30, verify=False)
@@ -47,6 +49,7 @@ def update_today_kma_data():
                 if line.strip().startswith('# YYMMDDHHMI'): header_line = line.replace('#', '').strip()
                 elif not line.strip().startswith('#') and line.strip(): data_lines.append(line.strip())
             if not header_line or not data_lines: return
+            
             headers = header_line.split()
             stn_index, temp_index, hum_index, pressure_index = headers.index('STN'), headers.index('TA'), headers.index('HM'), headers.index('PA')
             busan_data_lines = [line for line in data_lines if line.split()[stn_index] == '159']
@@ -67,11 +70,12 @@ def update_today_kma_data():
             if updated_count > 0: print(f"[SUCCESS] {updated_count}개의 새로운 데이터로 DB를 업데이트했습니다.")
             else: print("[INFO] 새로운 데이터가 없어 DB 업데이트를 건너뜁니다.")
         except Exception as e:
-            print(f"[FATAL] 스케줄러 작업 중 에러: {e}")
+            print(f"[FATAL] 데이터 업데이트 중 에러: {e}")
 
-# --- 3. 웹 페이지 렌더링 (최초 페이지 로딩) ---
+# --- 3. 웹 페이지 렌더링 (새로고침 시 업데이트 호출) ---
 @app.route('/')
 def dashboard():
+    update_kma_data_in_db()
     now_kst = datetime.now(KST)
     return render_template('index.html', display_date=now_kst.strftime('%Y-%m-%d %H:%M'))
 
@@ -134,12 +138,4 @@ def receive_arduino_data():
 if __name__ == '__main__':
     with app.app_context():
         db.create_all()
-        if not WeatherReading.query.filter_by(source='KMA').first():
-            print("--- KMA 초기 데이터 수집 시작 ---")
-            update_today_kma_data()
-            print("--- KMA 초기 데이터 수집 완료 ---")
-    scheduler.add_job(id='KMA Data Updater', func=update_today_kma_data, trigger='cron', minute=1)
-    scheduler.init_app(app)
-    scheduler.start()
-    print("스케줄러가 시작되었습니다. 매시 1분에 자동으로 데이터를 업데이트합니다.")
-    app.run(host='0.0.0.0', port=5000, debug=True, use_reloader=False)
+    app.run(host='0.0.0.0', port=5000, debug=True)
