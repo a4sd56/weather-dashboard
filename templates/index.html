@@ -94,7 +94,7 @@
             </div>
             <div class="card">
                 <h3>기압</h3>
-                <p id="arduino_pressure" class="value arduino">-- hPa</p>
+                <p id="arduino-pressure" class="value arduino">-- hPa</p>
                 <p id="kma-pressure" class="value kma">-- hPa</p>
             </div>
         </div>
@@ -154,6 +154,7 @@
                 document.getElementById('kma-temp').innerHTML = data.kma.temperature ? `${data.kma.temperature.toFixed(1)}<span class="unit">°C</span>` : '--°C';
                 document.getElementById('arduino-hum').innerHTML = data.arduino.humidity ? `${data.arduino.humidity.toFixed(0)}<span class="unit">%</span>` : '--%';
                 document.getElementById('kma-hum').innerHTML = data.kma.humidity ? `${data.kma.humidity.toFixed(0)}<span class="unit">%</span>` : '--%';
+                document.getElementById('arduino-pressure').innerHTML = data.arduino.pressure ? `${data.arduino.pressure.toFixed(1)}<span class="unit">hPa</span>` : '-- hPa';
                 document.getElementById('kma-pressure').innerHTML = data.kma.pressure ? `${data.kma.pressure.toFixed(1)}<span class="unit">hPa</span>` : '-- hPa';
 
                 // 3. 현재 활성화된 탭의 차트도 함께 업데이트

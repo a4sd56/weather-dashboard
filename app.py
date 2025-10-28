@@ -145,7 +145,7 @@ def get_chart_data(category):
         return jsonify({
             "labels": labels,
             "kma_values": values(kma_records, "pressure"),
-            "arduino_values": {}
+            "arduino_values": {r.timestamp.strftime("%H:%M"): r.pressure for r in arduino_records}
         })
     return jsonify({"error": "Invalid category"}), 404
 
@@ -172,6 +172,7 @@ def get_latest_data():
         "arduino": {
             "temperature": latest_arduino.temperature if latest_arduino else None,
             "humidity": latest_arduino.humidity if latest_arduino else None,
+            "pressure": latest_arduino.pressure if latest_arduino else None,
         },
     })
 
