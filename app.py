@@ -191,18 +191,19 @@ def read_from_arduino():
             line = ser.readline().decode().strip()
             if line:
                 vals = line.split(",")
-                if len(vals) == 2:
-                    t, h = map(float, vals)
+                if len(vals) == 3:
+                    t, h, p = map(float, vals)
                     with app.app_context():
                         rec = WeatherReading(
                             source="Arduino",
                             temperature=t,
                             humidity=h,
+                            pressure=p,
                             timestamp=datetime.now(KST)
                         )
                         db.session.add(rec)
                         db.session.commit()
-                        print(f"[Arduino] 저장 완료: T={t}, H={h}")
+                        print(f"[Arduino] 저장 완료: T={t}, H={h}, P={p}")
         except Exception as e:
             print(f"[WARN] 시리얼 읽기 오류: {e}")
         time.sleep(5)
@@ -213,7 +214,11 @@ if __name__ == "__main__":
         db.create_all()
 
     # 시리얼 읽기용 스레드 실행
-    threading.Thread(target=read_from_arduino, daemon=True).start()
+    if os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
+        print("[INFO] 아두이노 시리얼 읽기 스레드 시작 (메인 프로세스)")
+        threading.Thread(target=read_from_arduino, daemon=True).start()
+    else:
+        print("[INFO] 아두이노 시리얼 읽기 스레드 시작 건너뜀 (리스타터 프로세스)")
 
     # Flask 서버 실행
     app.run(host="0.0.0.0", port=5000, debug=True)
