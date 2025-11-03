@@ -180,8 +180,9 @@ def get_latest_data():
 def read_from_arduino():
     port = "COM3"  # 윈도우 포트 이름 (확인 후 변경 가능)
     baud = 9600
+    ser = None
     try:
-        ser = serial.Serial(port, baud)
+        ser = serial.Serial(port, baud, timeout=1)
         print(f"[INFO] 아두이노 연결 성공: {port}")
     except Exception as e:
         print(f"[ERROR] 아두이노 포트 연결 실패: {e}")
@@ -195,19 +196,47 @@ def read_from_arduino():
                 if len(vals) == 3:
                     t, h, p = map(float, vals)
                     with app.app_context():
-                        rec = WeatherReading(
-                            source="Arduino",
-                            temperature=t,
-                            humidity=h,
-                            pressure=p,
-                            timestamp=datetime.now(KST)
-                        )
+                        current_time_kst = datetime.now(KST)
+                        record_timestamp = current_time_kst.replace(second=0, microsecond=0)
+                        if record_timestamp.minute >= 30:
+                            record_timestamp = record_timestamp + timedelta(hours=1)
+                            record_timestamp = record_timestamp.replace(minute=0)
+                        else:
+                            record_timestamp = record_timestamp.replace(minute=0)
+                        exists = WeatherReading.query.filter_by(
+                            timestamp=record_timestamp, source="Arduino"
+                        ).first()
+                        if not exists:
+                            rec = WeatherReading(
+                                source="Arduino",
+                                temperature=t,
+                                humidity=h,
+                                pressure=p,
+                                timestamp=datetime.now(KST)
+                            )
                         db.session.add(rec)
                         db.session.commit()
                         print(f"[Arduino] 저장 완료: T={t}, H={h}, P={p}")
+
+        except ValueError as ve:
+            print(f"[WARN] 시리얼 데이터 변환 오류 (숫자가 아님): '{line}' - {ve}")
+        except IntegrityError:
+            db.session.rollback()
+            pass
+        except serial.SerialException as se:
+            print(f"[FATAL] 시리얼 통신 오류 발생: {se}")
+            ser.close()
+            ser = None
+            time.sleep(10)
+            try:
+                ser = serial.Serial(port, baude, timeout=1)
+                print(f"[INFO] 아두이노 재연결 성공: {port}")
+            except Exception as e:
+                print(f"[WARN] 아두이노 재연결 실패: {e}")
+                return
         except Exception as e:
-            print(f"[WARN] 시리얼 읽기 오류: {e}")
-        time.sleep(5)
+            print(f"[WARN] 시리얼 읽기 중 알 수 없는 오류: {e}")
+        time.sleep(60000)
 
 # --- 메인 실행 ---
 if __name__ == "__main__":

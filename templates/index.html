@@ -131,6 +131,14 @@
                 const response = await fetch(`/api/chart_data/${category}`);
                 const data = await response.json();
                 weatherChart.data.labels = data.labels;
+                const arduinoChartData = data.labels.map(label => {
+                // data.arduino_values는 {'HH:MM': value} 형태의 객체입니다.
+                // 해당 라벨 시간에 아두이노 데이터가 있는지 확인
+                const arduinoValue = data.arduino_values[label];
+                // 데이터가 없거나 null이면 null을 반환하여 차트에서 해당 지점을 그리지 않도록 합니다.
+                return (arduinoValue !== undefined && arduinoValue !== null) ? arduinoValue : null;
+                });
+
                 weatherChart.data.datasets[0].data = data.arduino_values;
                 weatherChart.data.datasets[1].data = data.kma_values;
                 const { title, unit } = chartTitleMap[category];
