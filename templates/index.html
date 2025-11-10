@@ -1,183 +1,153 @@
 <!DOCTYPE html>
 <html lang="ko">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PYDUINO 날씨 대시보드</title>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>PYDUINO 대시보드</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
-<style>
-    body {
-        font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
-        background-color: #fff;
-        margin: 40px;
-    }
-    .container {
-        max-width: 900px;
-        margin: auto;
-    }
-    .header {
-        background-color: #e0e68a;
-        padding: 15px 30px;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        font-size: 1.5em;
-        font-weight: bold;
-        color: #333;
-        border-radius: 5px;
-    }
-    .info-cards {
-        display: grid;
-        grid-template-columns: repeat(3, 1fr); /* 3열로 변경 */
-        gap: 20px;
-        margin: 20px 0;
-    }
-    .card {
-        background-color: #f0f0f0;
-        padding: 20px;
-        border-radius: 5px;
-        text-align: center;
-    }
-    .card h3 {
-        margin: 0 0 15px 0;
-        font-size: 1.1em;
-        color: #555;
-    }
-    .card .value {
-        font-size: 1.8em;
-        font-weight: 500;
-        margin: 5px 0;
-    }
-    .card .arduino { color: #007bff; }
-    .card .kma { color: #dc3545; }
-    .tabs {
-        display: flex;
-        margin-bottom: 20px;
-    }
-    .tab {
-        padding: 10px 20px;
-        border: 1px solid #ccc;
-        background-color: #f8f8f8;
-        cursor: pointer;
-        margin-right: -1px;
-    }
-    .tab:first-child { border-radius: 5px 0 0 5px; }
-    .tab:last-child { border-radius: 0 5px 5px 0; }
-    .tab.active {
-        background-color: #007bff;
-        color: white;
-        border-color: #007bff;
-    }
-    .chart-container {
-        border: 1px solid #ccc;
-        padding: 20px;
-    }
-</style>
 <body>
-    <div class="container">
-        <div class="header">
-            <span>PYDUINO</span>
-            <span id="display-time">{{ display_date }}</span>
-        </div>
+<div class="container">
+    <!-- 헤더 -->
+    <header class="header">
+        <span>PYDUINO</span>
+        <span id="display-time">{{ display_date }}</span>
+    </header>
 
-        <div class="info-cards">
-            <div class="card">
-                <h3>온도</h3>
-                <p id="arduino-temp" class="value arduino">--°C</p>
-                <p id="kma-temp" class="value kma">--°C</p>
-            </div>
-            <div class="card">
-                <h3>습도</h3>
-                <p id="arduino-hum" class="value arduino">--%</p>
-                <p id="kma-hum" class="value kma">--%</p>
-            </div>
-            <div class="card">
-                <h3>기압</h3>
-                <p id="arduino-pressure" class="value arduino">-- hPa</p>
-                <p id="kma-pressure" class="value kma">-- hPa</p>
-            </div>
+    <!-- 상단 카드 -->
+    <section class="info-cards">
+        <div class="card">
+            <h3>온도</h3>
+            <p id="arduino-temp" class="value arduino">--°C</p>
+            <p id="kma-temp" class="value kma">--°C</p>
         </div>
-
-        <div class="tabs">
-            <div class="tab active" data-category="temperature">온도</div>
-            <div class="tab" data-category="humidity">습도</div>
-            <div class="tab" data-category="pressure">기압</div>
+        <div class="card">
+            <h3>습도</h3>
+            <p id="arduino-hum" class="value arduino">--%</p>
+            <p id="kma-hum" class="value kma">--%</p>
         </div>
+        <div class="card">
+            <h3>기압</h3>
+            <p id="arduino-pressure" class="value arduino">-- hPa</p>
+            <p id="kma-pressure" class="value kma">-- hPa</p>
+        </div>
+    </section>
 
-        <div class="chart-container">
-            <canvas id="weatherChart"></canvas>
+    <!-- 탭  온도와 습도만 표시 -->
+    <div class="bar">
+        <div class="tabs" id="tabs">
+            <button class="tab active" data-category="temperature">온도</button>
+            <button class="tab" data-category="humidity">습도</button>
         </div>
     </div>
 
-    <script>
-        const ctx = document.getElementById('weatherChart').getContext('2d');
-        const weatherChart = new Chart(ctx, {
-            type: 'line',
-            data: { labels: [], datasets: [ { label: '아두이노', borderColor: '#007bff' }, { label: '기상청', borderColor: '#dc3545' } ] },
-            options: { responsive: true, plugins: { legend: { position: 'bottom' } }, scales: { y: { title: { display: true } } } }
-        });
-        const chartTitleMap = {
-            temperature: { title: '온도', unit: '°C' },
-            humidity: { title: '습도', unit: '%' },
-            pressure: { title: '기압', unit: 'hPa' }
-        };
+    <!-- 차트 -->
+    <section class="chart-container">
+        <canvas id="weatherChart"></canvas>
+    </section>
+</div>
 
-        // --- 차트를 업데이트하는 함수 ---
-        async function updateChart(category) {
-            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-            document.querySelector(`.tab[data-category="${category}"]`).classList.add('active');
-            try {
-                const response = await fetch(`/api/chart_data/${category}`);
-                const data = await response.json();
-                weatherChart.data.labels = data.labels;
-                weatherChart.data.datasets[0].data = data.arduino_values;
-                weatherChart.data.datasets[1].data = data.kma_values;
-                const { title, unit } = chartTitleMap[category];
-                weatherChart.options.scales.y.title.text = `${title} (${unit})`;
-                weatherChart.update();
-            } catch (error) { console.error('차트 데이터 로딩 실패:', error); }
-        }
-
-        // --- 1분마다 카드와 차트를 모두 업데이트하는 메인 함수 ---
-        async function updateDashboard() {
-            console.log("최신 데이터 업데이트를 시작합니다...");
-            try {
-                const response = await fetch('/api/latest-data');
-                const data = await response.json();
-
-                // 1. 헤더 시간 업데이트
-                document.getElementById('display-time').textContent = data.display_date;
-
-                // 2. 카드 값 업데이트 (데이터가 없으면 '--' 표시)
-                document.getElementById('arduino-temp').innerHTML = data.arduino.temperature ? `${data.arduino.temperature.toFixed(1)}<span class="unit">°C</span>` : '--°C';
-                document.getElementById('kma-temp').innerHTML = data.kma.temperature ? `${data.kma.temperature.toFixed(1)}<span class="unit">°C</span>` : '--°C';
-                document.getElementById('arduino-hum').innerHTML = data.arduino.humidity ? `${data.arduino.humidity.toFixed(0)}<span class="unit">%</span>` : '--%';
-                document.getElementById('kma-hum').innerHTML = data.kma.humidity ? `${data.kma.humidity.toFixed(0)}<span class="unit">%</span>` : '--%';
-                document.getElementById('arduino-pressure').innerHTML = data.arduino.pressure ? `${data.arduino.pressure.toFixed(1)}<span class="unit">hPa</span>` : '-- hPa';
-                document.getElementById('kma-pressure').innerHTML = data.kma.pressure ? `${data.kma.pressure.toFixed(1)}<span class="unit">hPa</span>` : '-- hPa';
-
-                // 3. 현재 활성화된 탭의 차트도 함께 업데이트
-                const activeCategory = document.querySelector('.tab.active').dataset.category;
-                await updateChart(activeCategory);
-
-                console.log("업데이트 완료.");
-            } catch (error) {
-                console.error('대시보드 업데이트 실패:', error);
+<script>
+    const ctx = document.getElementById('weatherChart').getContext('2d')
+    const weatherChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: [],
+            datasets: [
+                { label: '아두이노', data: [], borderColor: '#007bff', tension: 0.2, pointRadius: 3, spanGaps: false },
+                { label: '기상청', data: [], borderColor: '#dc3545', tension: 0.2, pointRadius: 3, spanGaps: false }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { position: 'bottom' } },
+            scales: {
+                x: { ticks: { maxTicksLimit: 12 } },
+                y: { title: { display: true, text: '' } }
             }
         }
-        
-        // --- 이벤트 리스너 및 타이머 설정 ---
-        // 탭 클릭 시 해당 차트로 변경
-        document.querySelectorAll('.tab').forEach(tab => {
-            tab.addEventListener('click', () => updateChart(tab.dataset.category));
-        });
+    })
 
-        // 페이지가 처음 로드될 때 즉시 한 번 실행
-        document.addEventListener('DOMContentLoaded', updateDashboard);
+    const chartTitleMap = {
+        temperature: { title: '온도', unit: '°C' },
+        humidity: { title: '습도', unit: '%' }
+    }
 
-        // 그 후, 1분(60000ms)마다 주기적으로 실행
-        setInterval(updateDashboard, 60000);
-    </script>
+    async function updateChart(category) {
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'))
+        const activeTab = document.querySelector(`.tab[data-category="${category}"]`)
+        if (activeTab) activeTab.classList.add('active')
+
+        try {
+            const resp = await fetch(`/api/chart_data/${category}`)
+            const data = await resp.json()
+            if (data.error) return
+
+            weatherChart.data.labels = data.labels
+            weatherChart.data.datasets[0].data = data.arduino_values
+            weatherChart.data.datasets[1].data = data.kma_values
+
+            const meta = chartTitleMap[category]
+            weatherChart.options.scales.y.title.text = `${meta.title} ${meta.unit}`
+            weatherChart.update()
+        } catch (e) {
+            console.error('차트 업데이트 실패:', e)
+        }
+    }
+
+    async function updateCards() {
+        try {
+            const resp = await fetch('/api/latest-data')
+            const data = await resp.json()
+            document.getElementById('display-time').textContent = data.display_date
+
+            const a = data.arduino || {}
+            const k = data.kma || {}
+
+            document.getElementById('arduino-temp').innerHTML =
+                a.temperature != null ? `${a.temperature.toFixed(1)}<span class="unit">°C</span>` : '--°C'
+            document.getElementById('kma-temp').innerHTML =
+                k.temperature != null ? `${k.temperature.toFixed(1)}<span class="unit">°C</span>` : '--°C'
+
+            document.getElementById('arduino-hum').innerHTML =
+                a.humidity != null ? `${a.humidity.toFixed(0)}<span class="unit">%</span>` : '--%'
+            document.getElementById('kma-hum').innerHTML =
+                k.humidity != null ? `${k.humidity.toFixed(0)}<span class="unit">%</span>` : '--%'
+
+            document.getElementById('arduino-pressure').innerHTML =
+                a.pressure != null ? `${a.pressure.toFixed(1)}<span class="unit">hPa</span>` : '-- hPa'
+            document.getElementById('kma-pressure').innerHTML =
+                k.pressure != null ? `${k.pressure.toFixed(1)}<span class="unit">hPa</span>` : '-- hPa'
+        } catch (e) {
+            console.error('카드 업데이트 실패:', e)
+        }
+    }
+
+    async function updateDashboard() {
+        await updateCards()
+        const active = document.querySelector('.tab.active')
+        const category = active ? active.dataset.category : 'temperature'
+        await updateChart(category)
+    }
+
+    // 탭 클릭
+    document.getElementById('tabs').addEventListener('click', e => {
+        const tab = e.target.closest('.tab')
+        if (!tab) return
+        updateChart(tab.dataset.category)
+    })
+
+    // 초기 로드  카드는 10초마다  차트는 1분마다
+    document.addEventListener('DOMContentLoaded', () => {
+        updateDashboard()
+        setInterval(updateCards, 10000)
+        setInterval(() => {
+            const active = document.querySelector('.tab.active')?.dataset.category || 'temperature'
+            updateChart(active)
+        }, 60000)
+    })
+</script>
 </body>
 </html>
