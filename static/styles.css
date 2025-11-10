@@ -1,0 +1,152 @@
+:root {
+    --bg: #ffffff;
+    --text: #333333;
+    --muted: #777777;
+    --brand: #e0e68a;
+    --card: #f0f0f0;
+    --arduino: #007bff;
+    --kma: #dc3545;
+    --delta: #6f42c1;
+    --border: #dcdcdc;
+}
+
+* { box-sizing: border-box }
+
+body {
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Oxygen, Ubuntu, Cantarell, Open Sans, Helvetica Neue, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    margin: 40px;
+}
+
+.container {
+    max-width: 980px;
+    margin: 0 auto;
+}
+
+.header {
+    background: var(--brand);
+    color: var(--text);
+    padding: 16px 24px;
+    border-radius: 8px;
+    font-size: 20px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.info-cards {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+    margin: 20px 0;
+}
+
+.card {
+    background: var(--card);
+    border-radius: 10px;
+    padding: 20px;
+    text-align: center;
+}
+
+.card h3 {
+    margin: 0 0 10px 0;
+    font-size: 14px;
+    color: var(--muted);
+    font-weight: 600;
+    letter-spacing: .2px;
+}
+
+.value {
+    font-size: 28px;
+    font-weight: 600;
+    margin: 6px 0;
+}
+
+.value .unit {
+    font-size: 12px;
+    margin-left: 4px;
+    color: var(--muted);
+}
+
+.arduino { color: var(--arduino) }
+.kma { color: var(--kma) }
+
+.bar {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+}
+
+.tabs { display: flex }
+.tab {
+    padding: 10px 16px;
+    background: #f8f8f8;
+    border: 1px solid var(--border);
+    cursor: pointer;
+    margin-right: -1px;
+    font-weight: 600;
+}
+.tab:first-child { border-radius: 8px 0 0 8px }
+.tab:last-child { border-radius: 0 8px 8px 0 }
+.tab.active {
+    background: #2c7be5;
+    color: #fff;
+    border-color: #2c7be5;
+}
+
+.controls {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.modes {
+    display: inline-flex;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+}
+.mode-btn {
+    padding: 10px 14px;
+    background: #f8f8f8;
+    border: 0;
+    cursor: pointer;
+    font-weight: 600;
+}
+.mode-btn + .mode-btn { border-left: 1px solid var(--border) }
+.mode-btn.active { background: #2c7be5; color: #fff }
+
+.metric {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: #f8f8f8;
+}
+.metric label {
+    font-size: 13px;
+    color: var(--muted);
+    font-weight: 600;
+}
+.metric select {
+    border: 1px solid var(--border);
+    padding: 6px 8px;
+    border-radius: 6px;
+    background: #fff;
+    min-width: 110px;
+}
+
+.chart-container {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+    height: 360px;
+    background: #fff;
+}
