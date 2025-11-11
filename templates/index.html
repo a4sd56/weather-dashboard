@@ -34,12 +34,18 @@
         </div>
     </section>
 
-    <!-- 탭 -->
+    <!-- 탭 + 오차율 버튼 그룹 -->
     <div class="bar">
         <div class="tabs" id="tabs">
             <button class="tab active" data-category="temperature">온도</button>
             <button class="tab" data-category="humidity">습도</button>
             <button class="tab" data-category="pressure">기압</button>
+        </div>
+
+        <div class="error-group" id="errorGroup">
+            <button class="error-btn" data-errcat="temperature">온도</button>
+            <button class="error-btn" data-errcat="humidity">습도</button>
+            <button class="error-btn" data-errcat="pressure">기압</button>
         </div>
     </div>
 
@@ -50,23 +56,21 @@
 </div>
 
 <script>
-    const ctx = document.getElementById('weatherChart').getContext('2d');
+    const ctx = document.getElementById('weatherChart').getContext('2d')
 
     const chartTitleMap = {
         temperature: { title: '온도', unit: '°C' },
         humidity: { title: '습도', unit: '%' },
         pressure: { title: '기압', unit: 'hPa' }
-    };
+    }
+
+    // mode: 'value' 일반 그래프, 'error' 오차 그래프
+    let mode = 'value'
+    let currentCategory = 'temperature' // 왼쪽 탭의 현재 선택값
 
     const weatherChart = new Chart(ctx, {
         type: 'line',
-        data: {
-            labels: [],
-            datasets: [
-                { label: '아두이노', data: [], borderColor: '#007bff', tension: 0.2, pointRadius: 3, spanGaps: false },
-                { label: '기상청', data: [], borderColor: '#dc3545', tension: 0.2, pointRadius: 3, spanGaps: false }
-            ]
-        },
+        data: { labels: [], datasets: [] },
         options: {
             responsive: true,
             maintainAspectRatio: false,
@@ -76,79 +80,109 @@
                 y: { title: { display: true, text: '' } }
             }
         }
-    });
+    })
 
+    // 일반 센서 그래프
     async function updateChart(category) {
-        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-        document.querySelector(`.tab[data-category="${category}"]`).classList.add('active');
+        mode = 'value'
+        currentCategory = category
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'))
+        document.querySelector(`.tab[data-category="${category}"]`).classList.add('active')
+        document.querySelectorAll('.error-btn').forEach(b => b.classList.remove('active'))
 
-        try {
-            const resp = await fetch(`/api/chart_data/${category}`);
-            const data = await resp.json();
-            if (data.error) return;
+        const resp = await fetch(`/api/chart_data/${category}`)
+        const data = await resp.json()
+        if (data.error) return
 
-            weatherChart.data.labels = data.labels;
-            weatherChart.data.datasets[0].data = data.arduino_values;
-            weatherChart.data.datasets[1].data = data.kma_values;
+        weatherChart.data.labels = data.labels
+        weatherChart.data.datasets = [
+            { label: '아두이노', data: data.arduino_values, borderColor: '#007bff', tension: 0.2, pointRadius: 3, spanGaps: false },
+            { label: '기상청', data: data.kma_values,      borderColor: '#dc3545', tension: 0.2, pointRadius: 3, spanGaps: false }
+        ]
 
-            const meta = chartTitleMap[category];
-            weatherChart.options.scales.y.title.text = `${meta.title} ${meta.unit}`;
-            weatherChart.update();
-
-        } catch (e) {
-            console.error('차트 업데이트 실패:', e);
-        }
+        const meta = chartTitleMap[category]
+        weatherChart.options.scales.y.title.text = `${meta.title} ${meta.unit}`
+        weatherChart.update()
     }
 
+    // 카테고리별 오차율 그래프
+    async function updateErrorChart(errCat) {
+        mode = 'error'
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'))
+        document.querySelectorAll('.error-btn').forEach(b => b.classList.remove('active'))
+        document.querySelector(`.error-btn[data-errcat="${errCat}"]`).classList.add('active')
+
+        const resp = await fetch(`/api/error_data/${errCat}`)
+        const data = await resp.json()
+        if (data.error) return
+
+        weatherChart.data.labels = data.labels
+        weatherChart.data.datasets = [
+            { label: `${chartTitleMap[errCat].title} 오차율`, data: data.errors, borderColor: '#6f42c1', tension: 0.2, pointRadius: 3, spanGaps: false }
+        ]
+        weatherChart.options.scales.y.title.text = '오차율 %'
+        weatherChart.update()
+    }
+
+    // 카드 업데이트
     async function updateCards() {
         try {
-            const resp = await fetch('/api/latest-data');
-            const data = await resp.json();
+            const resp = await fetch('/api/latest-data')
+            const data = await resp.json()
 
-            document.getElementById('display-time').textContent = data.display_date;
+            document.getElementById('display-time').textContent = data.display_date
 
-            const a = data.arduino || {};
-            const k = data.kma || {};
+            const a = data.arduino || {}
+            const k = data.kma || {}
 
             document.getElementById('arduino-temp').innerHTML =
-                a.temperature != null ? `${a.temperature.toFixed(1)}<span class="unit">°C</span>` : '--°C';
+                a.temperature != null ? `${a.temperature.toFixed(1)}<span class="unit">°C</span>` : '--°C'
             document.getElementById('kma-temp').innerHTML =
-                k.temperature != null ? `${k.temperature.toFixed(1)}<span class="unit">°C</span>` : '--°C';
+                k.temperature != null ? `${k.temperature.toFixed(1)}<span class="unit">°C</span>` : '--°C'
 
             document.getElementById('arduino-hum').innerHTML =
-                a.humidity != null ? `${a.humidity.toFixed(0)}<span class="unit">%</span>` : '--%';
+                a.humidity != null ? `${a.humidity.toFixed(0)}<span class="unit">%</span>` : '--%'
             document.getElementById('kma-hum').innerHTML =
-                k.humidity != null ? `${k.humidity.toFixed(0)}<span class="unit">%</span>` : '--%';
+                k.humidity != null ? `${k.humidity.toFixed(0)}<span class="unit">%</span>` : '--%'
 
             document.getElementById('arduino-pressure').innerHTML =
-                a.pressure != null ? `${a.pressure.toFixed(1)}<span class="unit">hPa</span>` : '-- hPa';
+                a.pressure != null ? `${a.pressure.toFixed(1)}<span class="unit">hPa</span>` : '-- hPa'
             document.getElementById('kma-pressure').innerHTML =
-                k.pressure != null ? `${k.pressure.toFixed(1)}<span class="unit">hPa</span>` : '-- hPa';
-        } catch (e) {
-            console.error('카드 업데이트 실패:', e);
+                k.pressure != null ? `${k.pressure.toFixed(1)}<span class="unit">hPa</span>` : '-- hPa'
+        } catch(e) {
+            console.error('카드 업데이트 실패:', e)
         }
     }
 
-    async function updateDashboard() {
-        await updateCards();
-        const active = document.querySelector('.tab.active').dataset.category;
-        await updateChart(active);
+    // 주기 갱신
+    function refreshActive() {
+        if (mode === 'error') {
+            const activeErr = document.querySelector('.error-btn.active')?.dataset.errcat || 'temperature'
+            updateErrorChart(activeErr)
+        } else {
+            updateChart(currentCategory)
+        }
     }
 
+    // 이벤트
     document.getElementById('tabs').addEventListener('click', e => {
-        const tab = e.target.closest('.tab');
-        if (!tab) return;
-        updateChart(tab.dataset.category);
-    });
+        const tab = e.target.closest('.tab')
+        if (!tab) return
+        updateChart(tab.dataset.category)
+    })
+
+    document.getElementById('errorGroup').addEventListener('click', e => {
+        const btn = e.target.closest('.error-btn')
+        if (!btn) return
+        updateErrorChart(btn.dataset.errcat)
+    })
 
     document.addEventListener('DOMContentLoaded', () => {
-        updateDashboard();
-        setInterval(updateCards, 10000);
-        setInterval(() => {
-            const active = document.querySelector('.tab.active').dataset.category;
-            updateChart(active);
-        }, 60000);
-    });
+        updateCards()
+        updateChart('temperature')
+        setInterval(updateCards, 10000)
+        setInterval(refreshActive, 60000)
+    })
 </script>
 </body>
 </html>
