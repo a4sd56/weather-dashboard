@@ -119,7 +119,7 @@ def mape_series(arduino_vals, kma_vals):
     return out, avg, latest
 
 # ---------------------------
-# KMA 초단기 T H 10분
+# KMA 초단기 T,H 10분
 # ---------------------------
 KMA_ULTRA_URL = "https://apis.data.go.kr/1360000/VilageFcstInfoService_2.0/getUltraSrtNcst"
 
@@ -212,7 +212,7 @@ def kma_ultra_thread():
         fetch_kma_ultra()
 
 # ---------------------------
-# KMA ASOS 1시간 T H P
+# KMA ASOS 1시간 T,H,P
 # ---------------------------
 KMA_ASOS_URL = "https://apihub.kma.go.kr/api/typ01/url/kma_sfctm3.php"
 
@@ -357,24 +357,40 @@ def compute_time_bounds_for_session(now_kst):
     return start, now_kst
 
 def fetch_series_for_category(category, start, now_kst):
+    """
+    category별 시계열 반환
+    pressure만 첫 아두이노 시각의 '정시로 내림'을 포함하도록 라벨 시작 시각을 조정
+    """
     field = FIELD_MAP.get(category)
     if not field:
         return None, None, None, None, None
 
-    labels_aw = ten_min_range(start, now_kst)
+    # 기본 라벨 시작은 첫 아두이노 시각
+    start_for_labels = start
+
+    # 요구사항: pressure에서는 첫 아두이노 시각의 '정시로 내림'도 포함
+    # 예: 첫 아두이노가 11:30이면 라벨은 11:00부터 시작
+    if category == "pressure":
+        hour_floor = start.replace(minute=0, second=0, microsecond=0)
+        start_for_labels = min(start, hour_floor)
+
+    labels_aw = ten_min_range(start_for_labels, now_kst)
     labels_dt = [t.replace(tzinfo=None) for t in labels_aw]
     labels = [t.strftime("%H:%M") for t in labels_aw]
 
+    # KMA 소스 선택
     if category == "pressure":
+        # 기압은 ASOS
         kma_recs = (
             WeatherReading.query.filter(
                 WeatherReading.source == "KMA",
-                WeatherReading.timestamp.between(start, now_kst),
+                WeatherReading.timestamp.between(start_for_labels, now_kst),
                 )
             .order_by(WeatherReading.timestamp)
             .all()
         )
     else:
+        # 온도/습도는 초단기 10분
         kma_recs = (
             WeatherReading.query.filter(
                 WeatherReading.source == "KMA10",
@@ -384,6 +400,7 @@ def fetch_series_for_category(category, start, now_kst):
             .all()
         )
 
+    # KMA 맵
     kma_map = {}
     for r in kma_recs:
         v = getattr(r, field)
@@ -392,10 +409,11 @@ def fetch_series_for_category(category, start, now_kst):
             kma_map[slot] = v
     kma_vals = linear_fill(kma_map, labels_dt)
 
+    # Arduino 값
     ard_recs = (
         WeatherReading.query.filter(
             WeatherReading.source == "Arduino",
-            WeatherReading.timestamp.between(start, now_kst),
+            WeatherReading.timestamp.between(start_for_labels, now_kst),
             )
         .order_by(WeatherReading.timestamp)
         .all()
@@ -439,21 +457,17 @@ def error_data(cat):
         {"labels": labels, "errors": errors, "avg_error": avg, "latest_error": latest, "unit": "%"}
     )
 
-# 새 엔드포인트 추가
 @app.route("/api/error_data_all")
 def error_data_all():
     now = ensure_kst(datetime.now())
     start, now_kst = compute_time_bounds_for_session(now)
 
-    # 온도
     labels, _, a_t, k_t, _ = fetch_series_for_category("temperature", start, now_kst)
     err_t, avg_t, latest_t = mape_series(a_t, k_t)
 
-    # 습도
     _, _, a_h, k_h, _ = fetch_series_for_category("humidity", start, now_kst)
     err_h, avg_h, latest_h = mape_series(a_h, k_h)
 
-    # 기압
     _, _, a_p, k_p, _ = fetch_series_for_category("pressure", start, now_kst)
     err_p, avg_p, latest_p = mape_series(a_p, k_p)
 
@@ -472,29 +486,35 @@ def latest():
     now = ensure_kst(datetime.now())
     start = now.replace(hour=0, minute=0, second=0, microsecond=0)
 
-    kma = (
+    # 온도/습도는 KMA10 우선, 없으면 KMA 사용
+    kma10 = (
         WeatherReading.query.filter(
-            WeatherReading.source.in_(["KMA10", "KMA"]), WeatherReading.timestamp >= start
-        )
-        .order_by(WeatherReading.timestamp.desc())
-        .first()
+            WeatherReading.source == "KMA10",
+            WeatherReading.timestamp >= start
+        ).order_by(WeatherReading.timestamp.desc()).first()
+    )
+    kma_asos = (
+        WeatherReading.query.filter(
+            WeatherReading.source == "KMA",
+            WeatherReading.timestamp >= start
+        ).order_by(WeatherReading.timestamp.desc()).first()
     )
 
     ard = WeatherReading.query.filter_by(source="Arduino").order_by(WeatherReading.timestamp.desc()).first()
 
+    kma_temp = kma10.temperature if kma10 and kma10.temperature is not None else (kma_asos.temperature if kma_asos else None)
+    kma_hum  = kma10.humidity    if kma10 and kma10.humidity    is not None else (kma_asos.humidity    if kma_asos else None)
+    kma_pres = kma_asos.pressure if kma_asos else None  # 기압은 ASOS 전용
+
     return jsonify(
         {
             "display_date": now.strftime("%Y-%m-%d %H:%M"),
-            "kma": {
-                "temperature": kma.temperature if kma else None,
-                "humidity": kma.humidity if kma else None,
-                "pressure": kma.pressure if kma else None,
-            },
+            "kma": {"temperature": kma_temp, "humidity": kma_hum, "pressure": kma_pres},
             "arduino": {
                 "temperature": ard.temperature if ard else None,
                 "humidity": ard.humidity if ard else None,
-                "pressure": ard.pressure if ard else None,
-            },
+                "pressure": ard.pressure if ard else None
+            }
         }
     )
 
