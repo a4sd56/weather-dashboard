@@ -222,20 +222,20 @@ def arduino_thread():
 # ---------------------------
 # 차트용 공통 로직
 # ---------------------------
+SERVER_START_KST = None
+
 def compute_time_bounds(now_kst):
-    """ 아두이노 첫 기록 시각을 차트 시작점으로 사용 """
-    first = (
-        WeatherReading.query.filter_by(source="Arduino")
-        .order_by(WeatherReading.timestamp.asc())
-        .first()
-    )
+    """서버 시작 시각을 차트 시작점으로 사용"""
+    global SERVER_START_KST
 
-    if first:
-        start = to_minute(ensure_kst(first.timestamp))
-    else:
-        start = to_minute(now_kst - timedelta(hours=1))
+    if SERVER_START_KST is None:
+        SERVER_START_KST = now_kst  # 안전장치
 
-    return start, now_kst
+    start = to_minute(SERVER_START_KST)
+    end = now_kst
+
+    return start, end
+
 
 
 def fetch_series(cat, start, now_kst):
@@ -293,6 +293,25 @@ def chart(cat):
         "kma_values": kma
     })
 
+@app.route("/api/error_data/<cat>")
+def error_data(cat):
+    now = ensure_kst(datetime.now())
+    start, end = compute_time_bounds(now)
+    labels, ard_vals, kma_vals = fetch_series(cat, start, end)
+
+    # MAPE 형태로 오차 계산
+    errors = []
+    for a, k in zip(ard_vals, kma_vals):
+        if a is None or k is None or k == 0:
+            errors.append(None)
+        else:
+            errors.append(round(abs(a - k) / abs(k) * 100, 2))
+
+    return jsonify({
+        "labels": labels,
+        "errors": errors
+    })
+
 
 @app.route("/api/latest-data")
 def latest():
@@ -345,6 +364,7 @@ def latest():
 if __name__ == "__main__":
     with app.app_context():
         db.create_all()
+    SERVER_START_KST = ensure_kst(datetime.now())
 
     threading.Thread(target=arduino_thread, daemon=True).start()
     threading.Thread(target=aws_thread, daemon=True).start()

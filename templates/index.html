@@ -84,45 +84,81 @@
 
     // 일반 센서 그래프
     async function updateChart(category) {
-        mode = 'value'
-        currentCategory = category
-        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'))
-        document.querySelector(`.tab[data-category="${category}"]`).classList.add('active')
-        document.querySelectorAll('.error-btn').forEach(b => b.classList.remove('active'))
+    mode = 'value';
+    currentCategory = category;
 
-        const resp = await fetch(`/api/chart_data/${category}`)
-        const data = await resp.json()
-        if (data.error) return
+    // 🔥 탭 버튼 활성화 적용
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelector(`.tab[data-category="${category}"]`).classList.add('active');
 
-        weatherChart.data.labels = data.labels
-        weatherChart.data.datasets = [
-            { label: '아두이노', data: data.arduino_values, borderColor: '#007bff', tension: 0.2, pointRadius: 3, spanGaps: false },
-            { label: '기상청', data: data.kma_values,      borderColor: '#dc3545', tension: 0.2, pointRadius: 3, spanGaps: false }
-        ]
+    // 🔥 오차 버튼은 모두 비활성화
+    document.querySelectorAll('.error-btn').forEach(b => b.classList.remove('active'));
 
-        const meta = chartTitleMap[category]
-        weatherChart.options.scales.y.title.text = `${meta.title} ${meta.unit}`
-        weatherChart.update()
-    }
+    // 그래프 타입은 라인으로 복귀
+    weatherChart.config.type = 'line';
+
+    const resp = await fetch(`/api/chart_data/${category}`);
+    const data = await resp.json();
+
+    weatherChart.data.labels = data.labels;
+    weatherChart.data.datasets = [
+        {
+            label: '아두이노',
+            data: data.arduino_values,
+            borderColor: '#007bff',
+            tension: 0.2,
+            pointRadius: 2
+        },
+        {
+            label: '기상청',
+            data: data.kma_values,
+            borderColor: '#dc3545',
+            tension: 0.2,
+            pointRadius: 2
+        }
+    ];
+
+    const meta = chartTitleMap[category];
+    weatherChart.options.scales.y.title.text = `${meta.title} ${meta.unit}`;
+
+    weatherChart.update();
+}
+
+
 
     // 카테고리별 오차율 그래프
     async function updateErrorChart(errCat) {
-        mode = 'error'
-        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'))
-        document.querySelectorAll('.error-btn').forEach(b => b.classList.remove('active'))
-        document.querySelector(`.error-btn[data-errcat="${errCat}"]`).classList.add('active')
+        mode = 'error';
 
-        const resp = await fetch(`/api/error_data/${errCat}`)
-        const data = await resp.json()
-        if (data.error) return
+        // 버튼 UI 상태 갱신
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.error-btn').forEach(b => b.classList.remove('active'));
+        document.querySelector(`.error-btn[data-errcat="${errCat}"]`).classList.add('active');
 
-        weatherChart.data.labels = data.labels
+        // API 호출
+        const resp = await fetch(`/api/error_data/${errCat}`);
+        const data = await resp.json();
+        if (data.error) return;
+
+        // 🔥 차트 타입을 막대(bar)로 변경
+        weatherChart.config.type = 'bar';
+
+        weatherChart.data.labels = data.labels;
         weatherChart.data.datasets = [
-            { label: `${chartTitleMap[errCat].title} 오차율`, data: data.errors, borderColor: '#6f42c1', tension: 0.2, pointRadius: 3, spanGaps: false }
-        ]
-        weatherChart.options.scales.y.title.text = '오차율 %'
-        weatherChart.update()
+            {
+                label: `${chartTitleMap[errCat].title} 오차율`,
+                data: data.errors,
+                backgroundColor: 'rgba(111, 66, 193, 0.6)',
+                borderColor: '#6f42c1',
+                borderWidth: 1
+            }
+        ];
+
+        weatherChart.options.scales.y.title.text = '오차율 %';
+
+        weatherChart.update();
     }
+
 
     // 카드 업데이트
     async function updateCards() {
