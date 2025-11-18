@@ -207,7 +207,7 @@ def read_from_arduino():
                         print(f"[Arduino] 저장 완료: T={t}, H={h}, P={p}")
         except Exception as e:
             print(f"[WARN] 시리얼 읽기 오류: {e}")
-        time.sleep(5)
+        time.sleep(60000)
 
 # --- 메인 실행 ---
 if __name__ == "__main__":
