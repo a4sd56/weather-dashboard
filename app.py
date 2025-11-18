@@ -1,199 +1,198 @@
 import os
 import threading
-import serial
-import requests
 import time
-from flask import Flask, render_template, jsonify
-from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime, timedelta, timezone
-from sqlalchemy.exc import IntegrityError
-import urllib3
+from urllib.parse import unquote
 
-# --- 기본 설정 ---
+import requests
+import serial
+import urllib3
+from flask import Flask, jsonify, render_template
+from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy.exc import IntegrityError
+from dotenv import load_dotenv
+
+# ---------------------------
+# 기본 설정
+# ---------------------------
 app = Flask(__name__)
 basedir = os.path.abspath(os.path.dirname(__file__))
-app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///" + os.path.join(basedir, "weather.db")
+
+load_dotenv(dotenv_path=os.path.join(basedir, ".env"), override=False)
+
+app.config["SQLALCHEMY_DATABASE_URI"] = (
+    f"mysql+pymysql://{os.getenv('MYSQL_USER')}:{os.getenv('MYSQL_PASS')}"
+    f"@{os.getenv('MYSQL_HOST')}:{os.getenv('MYSQL_PORT')}/{os.getenv('MYSQL_DB')}?charset=utf8mb4"
+)
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 db = SQLAlchemy(app)
+
 KST = timezone(timedelta(hours=9))
 
-# --- 데이터베이스 모델 ---
+
+# ---------------------------
+# DB 모델
+# ---------------------------
 class WeatherReading(db.Model):
+    __table_args__ = (db.UniqueConstraint("source", "timestamp", name="uniq_source_ts"),)
     id = db.Column(db.Integer, primary_key=True)
-    source = db.Column(db.String(10), nullable=False)
+    source = db.Column(db.String(10), nullable=False)  # Arduino, KMA
     temperature = db.Column(db.Float)
     humidity = db.Column(db.Float)
     pressure = db.Column(db.Float)
-    timestamp = db.Column(db.DateTime(timezone=True), nullable=False, unique=True)
+    timestamp = db.Column(db.DateTime(timezone=True), nullable=False)
 
-# --- 기상청 데이터 업데이트 ---
-def update_kma_data_in_db():
-    with app.app_context():
-        now_kst = datetime.now(KST)
-        print(f"\n[INFO] {now_kst.strftime('%Y-%m-%d')} 데이터 업데이트 시도")
 
-        auth_key = "AOns516sTNCp7OderLzQ7Q"
-        url = "https://apihub.kma.go.kr/api/typ01/url/kma_sfctm3.php"
-        start_time_str = now_kst.strftime("%Y%m%d0000")
-        end_time_str = now_kst.strftime("%Y%m%d2300")
-        params = {
-            "authKey": auth_key,
-            "tm1": start_time_str,
-            "tm2": end_time_str,
-            "stn": "159",
-            "help": "0",
-        }
+# ---------------------------
+# 유틸 함수
+# ---------------------------
+def ensure_kst(dt):
+    return dt.astimezone(KST) if dt.tzinfo else dt.replace(tzinfo=KST)
 
-        try:
-            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-            resp = requests.get(url, params=params, timeout=30, verify=False)
-            resp.raise_for_status()
+def to_minute(dt):
+    dt = ensure_kst(dt)
+    return dt.replace(second=0, microsecond=0)
 
-            lines = resp.text.strip().splitlines()
-            header_line = None
-            data_lines = []
-            for line in lines:
-                s = line.strip()
-                if s.startswith("# YYMMDDHHMI"):
-                    header_line = s.replace("#", "").strip()
-                elif s and not s.startswith("#"):
-                    data_lines.append(s)
+def minute_range(start, end):
+    out = []
+    cur = start
+    while cur <= end:
+        out.append(cur)
+        cur += timedelta(minutes=1)
+    return out
 
-            if not header_line or not data_lines:
-                print("[INFO] 수신 데이터 없음")
-                return
 
-            headers = header_line.split()
-            stn_idx = headers.index("STN")
-            ta_idx = headers.index("TA")
-            hm_idx = headers.index("HM")
-            pa_idx = headers.index("PA")
+# ---------------------------
+# AWS KMA (1분 단위 데이터 활용)
+# ---------------------------
+KMA_AWS_URL = "https://apihub.kma.go.kr/api/typ01/cgi-bin/url/nph-aws2_min"
 
-            busan_lines = [ln for ln in data_lines if ln.split()[stn_idx] == "159"]
-            updated = 0
-
-            for ln in busan_lines:
-                vals = ln.split()
-                record_time = datetime.strptime(vals[0], "%Y%m%d%H%M").replace(tzinfo=KST)
-                ta, hm, pa = vals[ta_idx], vals[hm_idx], vals[pa_idx]
-
-                if all(v and v != "-999.0" for v in [ta, hm, pa]):
-                    try:
-                        exists = WeatherReading.query.filter_by(timestamp=record_time, source="KMA").first()
-                        if not exists:
-                            rec = WeatherReading(
-                                source="KMA",
-                                temperature=float(ta),
-                                humidity=float(hm),
-                                pressure=float(pa),
-                                timestamp=record_time,
-                            )
-                            db.session.add(rec)
-                            db.session.commit()
-                            updated += 1
-                    except IntegrityError:
-                        db.session.rollback()
-
-            if updated:
-                print(f"[SUCCESS] {updated}건 DB 업데이트")
-            else:
-                print("[INFO] 신규 데이터 없음")
-        except Exception as e:
-            print(f"[FATAL] 데이터 업데이트 실패: {e}")
-
-# --- 웹 대시보드 ---
-@app.route("/")
-def dashboard():
-    update_kma_data_in_db()
-    now_kst = datetime.now(KST)
-    return render_template("index.html", display_date=now_kst.strftime("%Y-%m-%d %H:%M"))
-
-# --- 차트 데이터 API ---
-@app.route("/api/chart_data/<category>")
-def get_chart_data(category):
-    now_kst = datetime.now(KST)
-    start = now_kst.replace(hour=0, minute=0, second=0, microsecond=0)
-    end = now_kst.replace(hour=23, minute=59, second=59, microsecond=59)
-
-    kma_records = WeatherReading.query.filter(
-        WeatherReading.source == "KMA",
-        WeatherReading.timestamp.between(start, end)
-    ).order_by(WeatherReading.timestamp).all()
-
-    arduino_records = WeatherReading.query.filter(
-        WeatherReading.source == "Arduino",
-        WeatherReading.timestamp.between(start, end)
-    ).order_by(WeatherReading.timestamp).all()
-
-    labels = [r.timestamp.strftime("%H:%M") for r in kma_records]
-    def values(source_list, field):
-        return [getattr(r, field) for r in source_list]
-
-    if category == "temperature":
-        return jsonify({
-            "labels": labels,
-            "kma_values": values(kma_records, "temperature"),
-            "arduino_values": {r.timestamp.strftime("%H:%M"): r.temperature for r in arduino_records}
-        })
-    elif category == "humidity":
-        return jsonify({
-            "labels": labels,
-            "kma_values": values(kma_records, "humidity"),
-            "arduino_values": {r.timestamp.strftime("%H:%M"): r.humidity for r in arduino_records}
-        })
-    elif category == "pressure":
-        return jsonify({
-            "labels": labels,
-            "kma_values": values(kma_records, "pressure"),
-            "arduino_values": {r.timestamp.strftime("%H:%M"): r.pressure for r in arduino_records}
-        })
-    return jsonify({"error": "Invalid category"}), 404
-
-# --- 최신 데이터 API ---
-@app.route("/api/latest-data")
-def get_latest_data():
-    now_kst = datetime.now(KST)
-    start = now_kst.replace(hour=0, minute=0, second=0, microsecond=0)
-    latest_kma = WeatherReading.query.filter(
-        WeatherReading.source == "KMA",
-        WeatherReading.timestamp >= start
-    ).order_by(WeatherReading.timestamp.desc()).first()
-
-    latest_arduino = WeatherReading.query.filter_by(source="Arduino").order_by(
-        WeatherReading.timestamp.desc()).first()
-
-    return jsonify({
-        "display_date": now_kst.strftime("%Y-%m-%d %H:%M"),
-        "kma": {
-            "temperature": latest_kma.temperature if latest_kma else None,
-            "humidity": latest_kma.humidity if latest_kma else None,
-            "pressure": latest_kma.pressure if latest_kma else None,
-        },
-        "arduino": {
-            "temperature": latest_arduino.temperature if latest_arduino else None,
-            "humidity": latest_arduino.humidity if latest_arduino else None,
-            "pressure": latest_arduino.pressure if latest_arduino else None,
-        },
-    })
-
-# --- 아두이노 시리얼 읽기 스레드 ---
-def read_from_arduino():
-    port = "COM3"  # 윈도우 포트 이름 (확인 후 변경 가능)
-    baud = 9600
+def conv(v):
+    """AWS 결측값 전부 None 처리"""
+    if v is None:
+        return None
+    v = v.strip()
+    if v in ["", "-99", "-99.0", "-99.9", "-999", "-999.0", "-999.9"]:
+        return None
     try:
-        ser = serial.Serial(port, baud)
-        print(f"[INFO] 아두이노 연결 성공: {port}")
-    except Exception as e:
-        print(f"[ERROR] 아두이노 포트 연결 실패: {e}")
+        return float(v)
+    except:
+        return None
+
+
+def fetch_kma_aws():
+    key = os.getenv("KMA_AUTH_KEY")
+    if not key:
         return
+
+    now = ensure_kst(datetime.now())
+    params = {
+        "authKey": key,
+        "tm1": now.strftime("%Y%m%d0000"),
+        "tm2": now.strftime("%Y%m%d2300"),
+        "stn": "159",
+        "disp": "0",
+        "help": "0",
+    }
+
+    try:
+        urllib3.disable_warnings()
+        r = requests.get(KMA_AWS_URL, params=params, timeout=20, verify=False)
+        lines = r.text.strip().splitlines()
+
+        header = None
+        data = []
+
+        for ln in lines:
+            s = ln.strip()
+            if s.startswith("# YYMMDDHHMI"):
+                header = s.replace("#", "").strip()
+            elif s and not s.startswith("#"):
+                data.append(s)
+
+        if not header or not data:
+            return
+
+        h = header.split()
+        idx = {h[i]: i for i in range(len(h))}
+        ti, ta, hm, pa = idx["YYMMDDHHMI"], idx["TA"], idx["HM"], idx["PA"]
+
+        bucket = {}
+
+        for row in data:
+            p = row.split()
+            ts = datetime.strptime(p[ti], "%Y%m%d%H%M").replace(tzinfo=KST)
+
+            t = conv(p[ta])
+            hmd = conv(p[hm])
+            pres = conv(p[pa])
+
+            bucket[to_minute(ts)] = {"temperature": t, "humidity": hmd, "pressure": pres}
+
+        with app.app_context():
+            for ts, vals in bucket.items():
+                row = WeatherReading.query.filter_by(source="KMA", timestamp=ts).first()
+                if row:
+                    if vals["temperature"] is not None:
+                        row.temperature = vals["temperature"]
+                    if vals["humidity"] is not None:
+                        row.humidity = vals["humidity"]
+                    if vals["pressure"] is not None:
+                        row.pressure = vals["pressure"]
+                else:
+                    db.session.add(
+                        WeatherReading(
+                            source="KMA",
+                            temperature=vals["temperature"],
+                            humidity=vals["humidity"],
+                            pressure=vals["pressure"],
+                            timestamp=ts,
+                        )
+                    )
+            db.session.commit()
+
+    except Exception as e:
+        print("[AWS ERROR]", e)
+
+
+def aws_thread():
+    fetch_kma_aws()
+    while True:
+        time.sleep(60)  # 1분마다 시도
+        fetch_kma_aws()
+
+
+# ---------------------------
+# Arduino Thread
+# ---------------------------
+def arduino_thread():
+    port = os.getenv("ARDUINO_PORT", "COM3")
+    baud = int(os.getenv("ARDUINO_BAUD", "9600"))
+    last_min = None
+    ser = None
 
     while True:
         try:
-            line = ser.readline().decode().strip()
-            if line:
+            ser = serial.Serial(port, baud, timeout=2)
+            while True:
+                line = ser.readline().decode("utf-8", "ignore").strip()
+                if not line:
+                    continue
+
                 vals = line.split(",")
-                if len(vals) == 3:
-                    t, h, p = map(float, vals)
+                if len(vals) < 2:
+                    continue
+
+                try:
+                    t = float(vals[0])
+                    h = float(vals[1])
+                    p = float(vals[2]) if len(vals) >= 3 else None
+                except:
+                    continue
+
+                minute = to_minute(datetime.now())
+
+                if minute != last_min:
                     with app.app_context():
                         rec = WeatherReading(
                             source="Arduino",
@@ -207,19 +206,14 @@ def read_from_arduino():
                         print(f"[Arduino] 저장 완료: T={t}, H={h}, P={p}")
         except Exception as e:
             print(f"[WARN] 시리얼 읽기 오류: {e}")
-        time.sleep(60000)
+        time.sleep(5)
 
 # --- 메인 실행 ---
 if __name__ == "__main__":
     with app.app_context():
         db.create_all()
 
-    # 시리얼 읽기용 스레드 실행
-    if os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
-        print("[INFO] 아두이노 시리얼 읽기 스레드 시작 (메인 프로세스)")
-        threading.Thread(target=read_from_arduino, daemon=True).start()
-    else:
-        print("[INFO] 아두이노 시리얼 읽기 스레드 시작 건너뜀 (리스타터 프로세스)")
+    threading.Thread(target=arduino_thread, daemon=True).start()
+    threading.Thread(target=aws_thread, daemon=True).start()
 
-    # Flask 서버 실행
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    app.run(host="0.0.0.0", port=5000, debug=True, use_reloader=False)
