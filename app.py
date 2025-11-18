@@ -194,21 +194,154 @@ def arduino_thread():
 
                 if minute != last_min:
                     with app.app_context():
-                        rec = WeatherReading(
-                            source="Arduino",
-                            temperature=t,
-                            humidity=h,
-                            pressure=p,
-                            timestamp=datetime.now(KST)
-                        )
-                        db.session.add(rec)
-                        db.session.commit()
-                        print(f"[Arduino] 저장 완료: T={t}, H={h}, P={p}")
-        except Exception as e:
-            print(f"[WARN] 시리얼 읽기 오류: {e}")
-        time.sleep(5)
+                        try:
+                            db.session.add(
+                                WeatherReading(
+                                    source="Arduino",
+                                    temperature=t,
+                                    humidity=h,
+                                    pressure=p,
+                                    timestamp=minute,
+                                )
+                            )
+                            db.session.commit()
+                            last_min = minute
+                        except IntegrityError:
+                            db.session.rollback()
 
-# --- 메인 실행 ---
+        except:
+            time.sleep(5)
+        finally:
+            try:
+                if ser and ser.is_open:
+                    ser.close()
+            except:
+                pass
+
+
+# ---------------------------
+# 차트용 공통 로직
+# ---------------------------
+def compute_time_bounds(now_kst):
+    """ 아두이노 첫 기록 시각을 차트 시작점으로 사용 """
+    first = (
+        WeatherReading.query.filter_by(source="Arduino")
+        .order_by(WeatherReading.timestamp.asc())
+        .first()
+    )
+
+    if first:
+        start = to_minute(ensure_kst(first.timestamp))
+    else:
+        start = to_minute(now_kst - timedelta(hours=1))
+
+    return start, now_kst
+
+
+def fetch_series(cat, start, now_kst):
+    field = cat
+    labels_dt = minute_range(start, now_kst)
+    labels = [t.strftime("%H:%M") for t in labels_dt]
+
+    # KMA
+    kma_recs = (
+        WeatherReading.query.filter(
+            WeatherReading.source == "KMA",
+            WeatherReading.timestamp.between(start, now_kst),
+        )
+        .order_by(WeatherReading.timestamp)
+        .all()
+    )
+
+    kma_map = {to_minute(r.timestamp): getattr(r, field) for r in kma_recs}
+    kma_vals = [kma_map.get(t) for t in labels_dt]
+
+    # Arduino
+    ard_recs = (
+        WeatherReading.query.filter(
+            WeatherReading.source == "Arduino",
+            WeatherReading.timestamp.between(start, now_kst),
+        )
+        .order_by(WeatherReading.timestamp)
+        .all()
+    )
+
+    ard_map = {to_minute(r.timestamp): getattr(r, field) for r in ard_recs}
+    ard_vals = [ard_map.get(t) for t in labels_dt]
+
+    return labels, ard_vals, kma_vals
+
+
+# ---------------------------
+# Web API
+# ---------------------------
+@app.route("/")
+def dash():
+    now = ensure_kst(datetime.now())
+    return render_template("index.html", display_date=now.strftime("%Y-%m-%d %H:%M"))
+
+@app.route("/api/chart_data/<cat>")
+def chart(cat):
+    now = ensure_kst(datetime.now())
+    start, end = compute_time_bounds(now)
+
+    labels, ard, kma = fetch_series(cat, start, end)
+
+    return jsonify({
+        "labels": labels,
+        "arduino_values": ard,
+        "kma_values": kma
+    })
+
+
+@app.route("/api/latest-data")
+def latest():
+    now = ensure_kst(datetime.now())
+    start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+    def latest_non_null(source, field):
+        """특정 항목(field)의 null 아닌 최신값"""
+        return (
+            WeatherReading.query
+            .filter(
+                WeatherReading.source == source,
+                WeatherReading.timestamp >= start,
+                getattr(WeatherReading, field) != None
+            )
+            .order_by(WeatherReading.timestamp.desc())
+            .first()
+        )
+
+    # 항목별 최신 Arduino 값
+    ard_t = latest_non_null("Arduino", "temperature")
+    ard_h = latest_non_null("Arduino", "humidity")
+    ard_p = latest_non_null("Arduino", "pressure")
+
+    # 항목별 최신 KMA 값
+    kma_t = latest_non_null("KMA", "temperature")
+    kma_h = latest_non_null("KMA", "humidity")
+    kma_p = latest_non_null("KMA", "pressure")
+
+    return jsonify(
+        {
+            "display_date": now.strftime("%Y-%m-%d %H:%M"),
+            "arduino": {
+                "temperature": ard_t.temperature if ard_t else None,
+                "humidity":    ard_h.humidity if ard_h else None,
+                "pressure":    ard_p.pressure if ard_p else None
+            },
+            "kma": {
+                "temperature": kma_t.temperature if kma_t else None,
+                "humidity":    kma_h.humidity if kma_h else None,
+                "pressure":    kma_p.pressure if kma_p else None
+            }
+        }
+    )
+
+
+# ---------------------------
+# Main
+# ---------------------------
 if __name__ == "__main__":
     with app.app_context():
         db.create_all()
